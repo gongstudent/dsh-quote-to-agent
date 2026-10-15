@@ -27,7 +27,7 @@ lib/client.js         浏览器半边（全部逻辑）
 scripts/check.mjs     门禁：i18n key 集合 / t() 引用完整性 / CSS var() 兜底 / jsx 元数
 scripts/smoke.mjs     冒烟：bundle 信封、导出、加载期、槽位接线、渲染回归、目标解析
 scripts/audit.mjs     自审：包契约、兼容门槛、非官方依赖面、全局副作用
-scripts/mutate-check.mjs  变异测试工具（验证冒烟测试真的能抓住 bug）
+scripts/mutate-check.mjs  变异测试：验证冒烟测试的回归断言真能抓住对应 bug
 scripts/inspect-profile.cjs  只读检查 profile 组合树
 ```
 
@@ -152,6 +152,22 @@ if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) contin
 的 `name` 与 `id`、客户端 bundle 的 loader `id`、locale 命名空间、槽位 id 前缀与文档。）
 
 ## 变更记录
+
+**v1.18**（修「首次引用到子对话，引用不跟着发出去」）
+
+- **修**：右栏打开子会话后，**第一次发送丢引用**，第二次才带上。
+  **根因**：多分栏时 DOM 里同时存在两个 composer，而我的 `primaryButtonDisabled()`
+  用的是 `document.querySelector` —— 只拿到**第一个**（主对话那个）。主对话草稿为空时
+  它的发送按钮是禁用的，于是子会话的发送被误判成"禁用"而跳过注入。
+  第二次之所以能带上，是因为那时主对话的状态变了。
+- **修法**：三处查询全部**限定在本会话的容器内** —— 新增
+  `conversationRootOf(sessionId)`（遍历 `[data-conversation-content][data-conversation-session]`
+  逐个比对属性，避免拼选择器）+ `belongsToSession(element, sessionId)`；
+  `primaryButtonDisabled(sessionId)` 与 keydown / click 两条手势都过一遍该判定。
+- **改**：找不到本会话容器时 **fail-open**（返回 false 继续注入）—— 静默跳过正是这个 bug 的症状。
+- **加测试**：冒烟测试造了「主对话（按钮禁用）+ 子会话（可发送）」的假 DOM，
+  断言子会话不被主对话的禁用状态误伤；并用变异测试确认该断言真能抓住这个 bug。
+- **整理**：两个一次性变异脚本合并为 `scripts/mutate-check.mjs`（`list` / `apply <case>` / `restore`）。
 
 **v1.17**（改名 + 收尾）
 

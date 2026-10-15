@@ -35,15 +35,40 @@ globalThis.window = {
   getSelection: () => null,
 }
 
-// document 桩：记录被注册的监听器，用来断言"发送手势的两条路都拦上了"。
+// document 桩：记录被注册的监听器，用来断言"发送手势的两条路都拦上了"；
+// 并提供一个可控的多会话 DOM，用来复现"多分栏时查到别的会话"那类 bug。
 const docListeners = []
+const conversationRoots = []
 globalThis.document = {
   head: { appendChild() {} },
   body: null,
-  querySelector: () => null,
+  // 模拟真实 DOM：`querySelector` 只返回**第一个**匹配 —— 多分栏时就是主对话那个。
+  // 这一点很关键，否则测不出"查到别的会话"这类 bug。
+  querySelector: (selector) =>
+    selector.includes('_primary') && conversationRoots.length > 0
+      ? conversationRoots[0].querySelector(selector)
+      : null,
+  querySelectorAll: (selector) =>
+    selector.includes('data-conversation-session') ? conversationRoots : [],
   createElement: () => ({ dataset: {}, textContent: '', appendChild() {} }),
   addEventListener: (type, fn, capture) => docListeners.push({ type, capture }),
   removeEventListener: () => {},
+}
+
+/**
+ * 造一个假会话容器：含一个主发送按钮。
+ * @param sessionId 会话 id
+ * @param buttonDisabled 该会话发送按钮是否禁用
+ */
+function makeConversationRoot(sessionId, buttonDisabled) {
+  const button = { disabled: buttonDisabled, tag: 'button' }
+  const root = {
+    sessionId,
+    getAttribute: (name) => (name === 'data-conversation-session' ? sessionId : null),
+    contains: (el) => el === button,
+    querySelector: () => button,
+  }
+  return { root, button }
 }
 
 // 让 useEffect 真的执行一次，这样组件挂载期注册的监听器能被观察到。
@@ -541,6 +566,41 @@ if (actions !== null) {
     '使用调用方传入的 t，而不是从 scope 取 locale',
   )
   actions.resolvePendingSpawns()
+}
+
+// ---------------------------------------------------------------- 10. 多分栏限定
+
+console.log('\n— 多分栏：查询必须限定在本会话 —')
+
+if (plugin.__test !== undefined) {
+  const { conversationRootOf, belongsToSession, primaryButtonDisabled } = plugin.__test
+
+  // 复现真机场景：主对话在左（草稿空 → 发送按钮禁用），子会话在右（可发送）
+  const main = makeConversationRoot('session-main', true)
+  const child = makeConversationRoot('session-child', false)
+  conversationRoots.length = 0
+  conversationRoots.push(main.root, child.root)
+
+  check(conversationRootOf('session-child') === child.root, 'conversationRootOf 按会话 id 找到正确容器')
+  check(conversationRootOf('session-nope') === null, '找不到时返回 null')
+
+  check(belongsToSession(child.button, 'session-child') === true, '子会话的按钮属于子会话')
+  check(belongsToSession(child.button, 'session-main') === false, '子会话的按钮不属于主对话')
+
+  // 这条就是那个 bug 的回归：老实现用 document.querySelector 拿的是**第一个**
+  // 容器（主对话，按钮禁用），于是子会话的发送被误判成禁用 → 第一次发送丢引用。
+  check(
+    primaryButtonDisabled('session-child') === false,
+    '子会话的发送按钮不被主对话的禁用状态误伤（第一次发送丢引用的回归）',
+  )
+  check(primaryButtonDisabled('session-main') === true, '主对话自己的按钮仍是禁用')
+
+  // 找不到本会话容器时 fail-open：宁可注入也不静默跳过
+  conversationRoots.length = 0
+  check(
+    primaryButtonDisabled('session-child') === false,
+    '找不到本会话容器时 fail-open（返回 false，不静默跳过注入）',
+  )
 }
 
 // ---------------------------------------------------------------- 报告

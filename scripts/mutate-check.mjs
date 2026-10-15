@@ -1,5 +1,17 @@
-// 临时脚本：验证渲染回归测试确实能抓住「children 被当成第三参」这个 bug。
-// 用法：node scripts/mutate-check.mjs apply | restore
+/**
+ * 变异测试工具 —— 验证冒烟测试里的回归断言**真的能抓住**对应的 bug。
+ *
+ * 一个抓不到 bug 的回归测试等于没写。用法：
+ *
+ *   node scripts/mutate-check.mjs list            # 看有哪些用例
+ *   node scripts/mutate-check.mjs apply <case>    # 注入变异
+ *   node scripts/smoke.mjs                        # 应当失败
+ *   node scripts/mutate-check.mjs restore         # 还原
+ *   node scripts/smoke.mjs                        # 应当通过
+ *
+ * ⚠️ apply 会临时改 lib/client.js 并留一份 .bak；忘了 restore 的话，
+ * 下次 apply 会直接失败（有 .bak 就拒绝覆盖）。
+ */
 import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -8,29 +20,75 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const target = join(root, 'lib', 'client.js')
 const backup = join(root, 'lib', 'client.js.bak')
 
-const mode = process.argv[2]
+/** 每个用例：把「修好的写法」换回「有 bug 的写法」。 */
+const CASES = {
+  'jsx-arity': {
+    why: 'children 被当成 jsx/jsxs 的第三参（key）→ 元素渲染成空的',
+    expect: '展开列表里出现第 1 条引用原文 / 每个条目都有 children',
+    from: "'data-qd-item': item.id,\n                    children: [",
+    to: "'data-qd-item': item.id,\n                    _children: [",
+  },
+  'multipane-query': {
+    why: 'primaryButtonDisabled 用 document.querySelector 查到**别的会话**的发送按钮',
+    expect: '子会话的发送按钮不被主对话的禁用状态误伤',
+    from: [
+      '      const root = conversationRootOf(sessionId)',
+      '      if (root === null) return false',
+      '      const button = root.querySelector(ANCHOR_PRIMARY_BUTTON)',
+      '      return button !== null && button.disabled === true',
+    ].join('\n'),
+    to: [
+      '      const button = document.querySelector(ANCHOR_PRIMARY_BUTTON)',
+      '      return button !== null && button.disabled === true',
+    ].join('\n'),
+  },
+}
 
-if (mode === 'apply') {
-  copyFileSync(target, backup)
-  const source = readFileSync(target, 'utf8')
-  // 把条目 props 里的 children 改名 —— 等价于"children 没进 props"，
-  // 也就是真机上那个 bug 的效果。
-  const mutated = source.replace(/'data-qd-item': item\.id,(\s+)children:/, "'data-qd-item': item.id,$1_children:")
-  if (mutated === source) {
-    console.log('MUTATION FAILED: pattern not found')
-    process.exit(2)
+const [, , action, caseName] = process.argv
+
+if (action === 'list' || action === undefined) {
+  console.log('可用变异用例：')
+  for (const [name, spec] of Object.entries(CASES)) {
+    console.log('  ' + name)
+    console.log('      注入的 bug   : ' + spec.why)
+    console.log('      应失败的断言 : ' + spec.expect)
   }
-  writeFileSync(target, mutated)
-  console.log('mutation applied (children -> _children)')
-} else if (mode === 'restore') {
+  process.exit(action === undefined ? 2 : 0)
+}
+
+if (action === 'restore') {
   if (!existsSync(backup)) {
-    console.log('no backup to restore')
+    console.log('没有 .bak 可还原')
     process.exit(2)
   }
   copyFileSync(backup, target)
   unlinkSync(backup)
-  console.log('restored')
-} else {
-  console.log('usage: node scripts/mutate-check.mjs apply|restore')
-  process.exit(2)
+  console.log('已还原 lib/client.js')
+  process.exit(0)
 }
+
+if (action === 'apply') {
+  const spec = CASES[caseName]
+  if (spec === undefined) {
+    console.log('未知用例：' + caseName + '（用 list 看可用项）')
+    process.exit(2)
+  }
+  if (existsSync(backup)) {
+    console.log('已有 .bak —— 先跑 restore，避免覆盖上一轮的备份')
+    process.exit(2)
+  }
+  copyFileSync(target, backup)
+  const source = readFileSync(target, 'utf8')
+  if (!source.includes(spec.from)) {
+    console.log('变异失败：源里找不到目标片段（代码已改动？）')
+    unlinkSync(backup)
+    process.exit(2)
+  }
+  writeFileSync(target, source.replace(spec.from, spec.to))
+  console.log('已注入变异 [' + caseName + ']：' + spec.why)
+  console.log('现在跑 node scripts/smoke.mjs —— 应当失败于：' + spec.expect)
+  process.exit(0)
+}
+
+console.log('用法：node scripts/mutate-check.mjs list | apply <case> | restore')
+process.exit(2)

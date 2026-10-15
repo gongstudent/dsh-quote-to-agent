@@ -1,0 +1,9 @@
+# dsh-quote-to-agent bundle patch.
+#
+# `dsh plugin add` 之后，package.json 的 dsh.bundle.patch 会把本包追加进
+# dsh.profile.bundles；再由下面这一行把插件本体插入组合树。
+#
+# 只有一个 insert 行，不覆盖任何官方条目（patch 语义是「插入」，不是「替换」）。
+- insert:
+    - id: quote-to-agent
+      name: dsh-quote-to-agent

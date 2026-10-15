@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 本机开发笔记，不随仓库发布
+需求文档.md

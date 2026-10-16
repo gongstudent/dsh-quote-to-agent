@@ -1,0 +1,12 @@
+{
+  "screenshots": [
+    "assets/01-select-and-actions.png",
+    "assets/02-quote-to-current.png",
+    "assets/03-quote-expanded.png",
+    "assets/04-quote-to-subagent-pending.png",
+    "assets/05-subagent-pane-opened.png",
+    "assets/06-subagent-picker.png",
+    "assets/07-subagent-three-actions.png",
+    "assets/08-subagent-to-main.png"
+  ]
+}

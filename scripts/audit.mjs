@@ -76,6 +76,7 @@ const sideEffects = [
 ]
 for (const [label, n] of sideEffects) console.log('  ' + label.padEnd(24) + n)
 
+const listeners = count(/document\.addEventListener\(/g) + count(/window\.addEventListener\(/g)
 console.log('')
 console.log('  preventDefault 的 2 处都挂在**插件自己的按钮**上（onMouseDown），不拦官方元素。')
-console.log('  7 个全局监听器全部 capture，但都不 preventDefault / stopPropagation —— 只观察不拦截。')
+console.log('  ' + listeners + ' 个全局监听器全部 capture，但都不 preventDefault / stopPropagation —— 只观察不拦截。')

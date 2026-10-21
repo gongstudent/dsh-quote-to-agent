@@ -113,6 +113,8 @@ $env:ELECTRON_RUN_AS_NODE='1'
 - 按依赖拆分的挂载面（引用条只等 `slots`；动作条另等 `sessions` / `sidebarRight` / `conversation`）
 - 每个挂载面独立 ErrorBoundary（失败渲染 `null`）
 - 划词检测（封装为单一模块，全部非官方 DOM 锚点集中在此）
+- 动作条去留：**在 `mousedown` 判定**（点别处 / 点动作条自己的 padding、圆角、按钮间隙都收起），
+  同一份残留选区不会在 `mouseup` 又被浮出来（issue #1 的回归）
 - 引用条：输入框最左侧正上方的横向圆角矩形，收起显示条数、悬停展开原文列表、每条带 × 删除
 - 划词动作条 + 子智能体选择器（teammate 优先，回落普通子智能体；只读项标注）
 - 右侧子会话打开（复用官方 `subagentchat` tab，`preferNewPane` 与主对话同屏）
@@ -162,7 +164,7 @@ if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) contin
 |---|---|
 | 全局变量赋值 | **0** |
 | 原生定时器（`setTimeout`/`setInterval`） | **0** |
-| 全局监听器 | 7 个，全部 capture，但 **0 处 `preventDefault` / `stopPropagation`** —— 只观察不拦截 |
+| 全局监听器 | 8 个，全部 capture，但 **0 处 `preventDefault` / `stopPropagation`** —— 只观察不拦截 |
 | `preventDefault` | 仅 2 处，都挂在**插件自己的按钮**上（`onMouseDown`） |
 | 依赖的官方 `slash/*` 事件 | **0** |
 | 槽位 id / locale 命名空间 | 全部私有前缀（`quote-to-agent-*` / `dsh-quote-to-agent`） |
@@ -202,6 +204,10 @@ if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) contin
 - `Shift+Enter` 换行是否原样放行
 - 中文输入法组合中按回车（`isComposing` / `keyCode 229`）是否被正确跳过
 - 图片上传未完成时的 busy-enter 路径
+
+**动作条去留**（issue #1）：修复后「点别处 / 点动作条自身的空白处就收起」由 `mousedown`
+判定，已用冒烟用例 + 变异测试验证；真机手感（尤其点动作条 padding、按钮间隙）还没在
+Desktop 上确认。
 
 不稳的话，退路是改用官方引用芯片（`inputTriggers` + `codec`）——
 代价是引用会以行内 chip 出现，且草稿里也能看到。

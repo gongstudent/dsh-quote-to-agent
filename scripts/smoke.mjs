@@ -51,7 +51,8 @@ globalThis.document = {
   querySelectorAll: (selector) =>
     selector.includes('data-conversation-session') ? conversationRoots : [],
   createElement: () => ({ dataset: {}, textContent: '', appendChild() {} }),
-  addEventListener: (type, fn, capture) => docListeners.push({ type, capture }),
+  // 监听器本身也留着：动作条去留那个用例要按真实事件顺序驱动它。
+  addEventListener: (type, fn, capture) => docListeners.push({ type, fn, capture }),
   removeEventListener: () => {},
 }
 
@@ -601,6 +602,148 @@ if (plugin.__test !== undefined) {
     primaryButtonDisabled('session-child') === false,
     '找不到本会话容器时 fail-open（返回 false，不静默跳过注入）',
   )
+}
+
+// ---------------------------------------------------------------- 11. 动作条去留
+
+console.log('\n— 划词动作条：取消选中必须收起 —')
+
+if (plugin.__test !== undefined && typeof plugin.__test.SelectionActions === 'function') {
+  const { SelectionActions } = plugin.__test
+
+  // 这个用例要「按真实事件顺序驱动 + 看 setState 收到了什么」，所以换一套可控 React 桩：
+  // 渲染本身不重要（组件在无选区时返回 null），要断言的是 mousedown/mouseup 的判定。
+  class ElementStub {
+    constructor() {
+      this.nodeType = 1
+      this.closest = () => null
+      this.getAttribute = () => null
+    }
+  }
+  const savedElement = globalThis.Element
+  globalThis.Element = ElementStub
+
+  const savedUseState = reactStub.useState
+  const stateWrites = []
+  reactStub.useState = (initial) => [
+    typeof initial === 'function' ? initial() : initial,
+    (next) => stateWrites.push(next),
+  ]
+
+  // 假 DOM：选区落在会话记录内（readSelection 的合法性判定逐条满足）
+  const transcript = new ElementStub()
+  const content = new ElementStub()
+  const textEl = new ElementStub()
+  transcript.closest = (selector) =>
+    selector === '[data-conversation-scroll]'
+      ? transcript
+      : selector === '[data-conversation-content]'
+        ? content
+        : null
+  content.getAttribute = (name) => (name === 'data-conversation-session' ? 'session-sel' : null)
+  textEl.closest = (selector) => (selector === '[data-conversation-scroll]' ? transcript : null)
+
+  const rect = { left: 100, bottom: 200 }
+  let currentSelection = null
+  const savedGetSelection = globalThis.window.getSelection
+  globalThis.window.getSelection = () => currentSelection
+  const makeSelection = (text) => ({
+    isCollapsed: false,
+    rangeCount: 1,
+    toString: () => text,
+    getRangeAt: () => ({
+      startContainer: textEl,
+      endContainer: textEl,
+      startOffset: 0,
+      endOffset: text.length,
+      getBoundingClientRect: () => rect,
+    }),
+  })
+
+  // 三种按下位置：页面空白 / 动作条的按钮 / 动作条的 padding（或按钮之间的 gap）
+  const barRoot = new ElementStub()
+  const target = (closestMap) => {
+    const element = new ElementStub()
+    element.closest = (selector) => closestMap[selector] ?? null
+    return element
+  }
+  const pageTarget = target({})
+  const barButton = target({ '[data-qd-root]': barRoot, button: {} })
+  const barPadding = target({ '[data-qd-root]': barRoot })
+
+  docListeners.length = 0
+  stateWrites.length = 0
+
+  const stubActions = {
+    pendingSpawnCount: () => 0,
+    pendingSpawnLeads: () => [],
+    resolvePendingSpawns: () => ({ delivered: 0, expired: 0 }),
+    resolveContext: () => ({ lead: 'session-sel', isSubagent: false }),
+    listTargets: () => ({ lead: 'session-sel', members: [], loading: false }),
+    refreshTargets() {},
+    quoteTo() {},
+    quoteToSub() {},
+    stageSpawnForSubagent() {},
+  }
+
+  try {
+    SelectionActions({
+      t: (key) => key,
+      actions: stubActions,
+      useSessions: (selector) => selector({ projectionsBySession: {} }),
+    })
+    check(true, 'SelectionActions 可渲染')
+  } catch (error) {
+    check(false, 'SelectionActions 可渲染 —— ' + error.stack)
+  }
+
+  const fire = (type, eventTarget) => {
+    for (const entry of docListeners) {
+      if (entry.type === type && entry.capture === true) entry.fn({ type, target: eventTarget })
+    }
+  }
+
+  check(
+    docListeners.some((entry) => entry.type === 'mousedown' && entry.capture === true),
+    '注册了 mousedown 捕获监听（收起判定不能等 mouseup）',
+  )
+
+  // 1. 划完词松手 → 动作条浮出
+  currentSelection = makeSelection('第一段被选中的话')
+  fire('mouseup', pageTarget)
+  check(stateWrites.length === 1 && stateWrites[0] !== null, '划词后 mouseup 浮出动作条')
+
+  // 2. 点在动作条自己的按钮上 → 不许收起（按钮的 onClick 还得跑）
+  stateWrites.length = 0
+  fire('mousedown', barButton)
+  check(stateWrites.length === 0, '点在动作条按钮上不收起')
+
+  // 3. 点动作条自己的 padding / 圆角 / 按钮间隙 → 收起。
+  //    这就是 issue #1 的真实路径：条浮在选区下沿，用户以为在点空白。
+  fire('mousedown', barPadding)
+  check(stateWrites.length === 1 && stateWrites[0] === null, '点在动作条的空白处就收起')
+
+  // 4. 同一份选区在 mouseup 时还没被浏览器收掉 → 不许按它重新浮出来
+  stateWrites.length = 0
+  fire('mouseup', pageTarget)
+  check(stateWrites.length === 0, '刚收起过的同一选区不会在 mouseup 又浮出来')
+
+  // 5. 换一段选区 → 照常浮出
+  stateWrites.length = 0
+  currentSelection = makeSelection('另一段完全不同的选区')
+  fire('mouseup', pageTarget)
+  check(stateWrites.length === 1 && stateWrites[0] !== null, '换一段选区仍然照常浮出')
+
+  // 6. 在会话区空白处按下（浏览器已经把选区清掉）→ 收起
+  stateWrites.length = 0
+  currentSelection = null
+  fire('mousedown', pageTarget)
+  check(stateWrites.length === 1 && stateWrites[0] === null, '点会话区空白处收起动作条')
+
+  // 收尾：别把桩留给后面的用例
+  globalThis.window.getSelection = savedGetSelection
+  globalThis.Element = savedElement
+  reactStub.useState = savedUseState
 }
 
 // ---------------------------------------------------------------- 报告

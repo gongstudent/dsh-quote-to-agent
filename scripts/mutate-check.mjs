@@ -28,6 +28,18 @@ const CASES = {
     from: "'data-qd-item': item.id,\n                    children: [",
     to: "'data-qd-item': item.id,\n                    _children: [",
   },
+  'dismiss-on-mousedown': {
+    why: '收起只在 mouseup 判定，且动作条内部一律早退 —— 点它自己的 padding 不会收起',
+    expect: '点在动作条的空白处就收起',
+    from: 'if (insideSelf(event.target) && ownButton(event.target)) return',
+    to: 'if (insideSelf(event.target)) return',
+  },
+  'stale-selection-reshow': {
+    why: 'mouseup 不比对「刚收起过的选区」，同一份残留选区又浮出来',
+    expect: '刚收起过的同一选区不会在 mouseup 又浮出来',
+    from: 'if (sameSelectionRange(dismissed, selection.key)) return',
+    to: 'if (false) return',
+  },
   'multipane-query': {
     why: 'primaryButtonDisabled 用 document.querySelector 查到**别的会话**的发送按钮',
     expect: '子会话的发送按钮不被主对话的禁用状态误伤',

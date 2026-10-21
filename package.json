@@ -1,6 +1,6 @@
 {
   "name": "dsh-quote-to-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "DSH Web 客户端插件：选中 AI 回复中的一句或多句，引用到当前对话（输入框最左侧正上方的引用条），或分派到子智能体对话（右侧面板打开，没有子智能体时自动派生）。",
   "type": "module",
